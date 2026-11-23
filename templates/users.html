@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Users & Security — RusaImport{% endblock %}
+{% block page_title %}Users &amp; Security Management{% endblock %}
+{% block page_subtitle %}Manage system users, roles, and update password credentials{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Left Column: Change Own Password & Create New User -->
+    <div class="space-y-6">
+        <!-- Change Password Card -->
+        <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h2 class="text-sm font-bold text-slate-900 mb-3">Change Your Password</h2>
+            <form action="{{ url_for('users_manage') }}" method="POST" class="space-y-3 text-sm">
+                <input type="hidden" name="action" value="change_password">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Current Password *</label>
+                    <input type="password" name="current_password" required
+                           class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">New Password *</label>
+                    <input type="password" name="new_password" required minlength="4"
+                           class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
+                </div>
+                <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2 px-4 rounded-lg transition text-xs">
+                    Update My Password
+                </button>
+            </form>
+        </div>
+
+        {% if current_user and current_user.is_admin %}
+        <!-- Create New User Card -->
+        <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h2 class="text-sm font-bold text-slate-900 mb-3">Create New User Account</h2>
+            <form action="{{ url_for('users_manage') }}" method="POST" class="space-y-3 text-sm">
+                <input type="hidden" name="action" value="create">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Username *</label>
+                    <input type="text" name="username" required placeholder="e.g. manager_ccs"
+                           class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Password *</label>
+                    <input type="password" name="password" required minlength="4" placeholder="Minimum 4 characters"
+                           class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Role *</label>
+                    <select name="role" class="w-full rounded-lg border border-slate-300 px-3 py-2 bg-white text-sm">
+                        <option value="Admin">Admin (Full Access)</option>
+                        <option value="Manager">Manager (Operations)</option>
+                        <option value="Cashier">Cashier (POS &amp; Inventory)</option>
+                    </select>
+                </div>
+                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition text-xs">
+                    + Create User
+                </button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Right 2 Columns: Registered Users Table -->
+    <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-fit">
+        <div class="px-5 py-4 border-b border-slate-100">
+            <h2 class="font-bold text-slate-900 text-sm">Authorized System Users ({{ users|length }})</h2>
+            <p class="text-xs text-slate-500">All passwords are stored as cryptographic hashes via werkzeug.security</p>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 text-slate-500 uppercase border-b border-slate-200">
+                    <tr>
+                        <th class="px-4 py-3">ID</th>
+                        <th class="px-4 py-3">Username</th>
+                        <th class="px-4 py-3">Role</th>
+                        <th class="px-4 py-3">Created</th>
+                        <th class="px-4 py-3 text-right">Action</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 text-sm">
+                    {% for u in users %}
+                    <tr class="hover:bg-slate-50">
+                        <td class="px-4 py-3 font-mono text-xs text-slate-400">#{{ u.id }}</td>
+                        <td class="px-4 py-3 font-bold text-slate-900">
+                            {{ u.username }}
+                            {% if current_user and u.id == current_user.id %}
+                                <span class="ml-1.5 text-[11px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-semibold">You</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3">
+                            <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold
+                                {% if u.is_admin %}bg-indigo-50 text-indigo-700{% else %}bg-slate-100 text-slate-700{% endif %}">
+                                {{ u.role }}
+                            </span>
+                        </td>
+                        <td class="px-4 py-3 text-xs text-slate-500">{{ u.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td class="px-4 py-3 text-right">
+                            {% if current_user and current_user.is_admin and u.id != current_user.id %}
+                            <form action="{{ url_for('delete_user', user_id=u.id) }}" method="POST" class="inline"
+                                  onsubmit="return confirm('Delete user {{ u.username }}?');">
+                                <button type="submit" class="text-xs font-medium text-rose-600 hover:underline">Delete</button>
+                            </form>
+                            {% else %}
+                            <span class="text-xs text-slate-300">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

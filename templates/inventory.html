@@ -1,0 +1,367 @@
+{% extends "base.html" %}
+{% block title %}Multi-Location Inventory — RusaImport{% endblock %}
+{% block page_title %}Current Stock &amp; Multi-Location Inventory{% endblock %}
+{% block page_subtitle %}Filter stock by warehouse/store location, monitor minimum stock alerts, and manage products{% endblock %}
+
+{% block content %}
+<!-- Top Filter & Summary Bar for Current Stock View -->
+<div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-4">
+    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div>
+            <div class="flex items-center gap-2">
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-indigo-50 text-indigo-700">
+                    {% if selected_location %}
+                        Location View: {{ selected_location.name }}
+                    {% else %}
+                        Global View: All Locations
+                    {% endif %}
+                </span>
+                <span class="text-xs text-slate-400">
+                    {{ stock_rows|length }} product(s) &bull; {{ "{:,}".format(total_view_units) }} units &bull; Valuation: ${{ "{:,.2f}".format(total_view_valuation) }}
+                </span>
+            </div>
+            <h2 class="text-base font-bold text-slate-900 mt-1">
+                {% if selected_location %}
+                    Current Stock in {{ selected_location.name }} ({{ selected_location.location_type }})
+                {% else %}
+                    Current Stock Across All Active Locations
+                {% endif %}
+            </h2>
+        </div>
+
+        <!-- Dropdown Selector + Search Input -->
+        <div class="flex flex-wrap items-center gap-2.5">
+            <form action="{{ url_for('inventory') }}" method="GET" id="locationFilterForm" class="flex items-center gap-2">
+                <label for="stockLocationSelect" class="text-xs font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap">
+                    Filter Location:
+                </label>
+                <select name="location_id" id="stockLocationSelect" onchange="this.form.submit()"
+                        class="rounded-lg border border-indigo-300 bg-indigo-50/40 px-3 py-2 text-xs font-bold text-slate-900 focus:border-indigo-600 focus:outline-none">
+                    <option value="all" {% if location_filter == 'all' %}selected{% endif %}>
+                        All Locations ({{ active_locations|length }})
+                    </option>
+                    {% for loc in active_locations %}
+                        <option value="{{ loc.id }}" {% if selected_location and selected_location.id == loc.id %}selected{% endif %}>
+                            {{ loc.name }} ({{ loc.location_type }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </form>
+
+            <input type="text" id="stockSearchInput" oninput="filterStockTable()"
+                   placeholder="Quick filter SKU, product, category..."
+                   class="rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-800 focus:border-indigo-500 focus:outline-none w-56">
+        </div>
+    </div>
+
+    <!-- Interactive Location Tab Pills -->
+    <div class="flex flex-wrap items-center gap-1.5 pt-3 border-t border-slate-100">
+        <a href="{{ url_for('inventory', location_id='all') }}"
+           class="px-3 py-1.5 rounded-lg text-xs font-semibold transition
+               {% if location_filter == 'all' %}
+                   bg-slate-900 text-white shadow-sm
+               {% else %}
+                   bg-slate-100 text-slate-600 hover:bg-slate-200
+               {% endif %}">
+            All Locations
+        </a>
+        {% for loc in active_locations %}
+        <a href="{{ url_for('inventory', location_id=loc.id) }}"
+           class="px-3 py-1.5 rounded-lg text-xs font-semibold transition
+               {% if selected_location and selected_location.id == loc.id %}
+                   bg-indigo-600 text-white shadow-sm
+               {% else %}
+                   bg-slate-100 text-slate-600 hover:bg-slate-200
+               {% endif %}">
+            {{ loc.name }}
+        </a>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Current Stock Table -->
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+    <div class="px-5 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div>
+            <h3 class="font-bold text-slate-900 text-sm">
+                {% if selected_location %}
+                    Products &amp; Stock Quantities in {{ selected_location.name }}
+                {% else %}
+                    All Products &amp; Stock Quantities
+                {% endif %}
+            </h3>
+            <p class="text-xs text-slate-500">
+                {% if selected_location %}
+                    Showing only products and quantities belonging to <strong>{{ selected_location.name }}</strong>
+                {% else %}
+                    Showing combined stock quantities across all active locations (select a location above to isolate its stock)
+                {% endif %}
+            </p>
+        </div>
+        <div class="flex items-center gap-4">
+            {% if low_stock_count > 0 %}
+                <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                    {{ low_stock_count }} Low / Out of Stock Alert(s)
+                </span>
+            {% endif %}
+            <a href="{{ url_for('purchases') }}" class="text-xs font-semibold text-emerald-700 hover:underline">
+                + Receive Purchase &rarr;
+            </a>
+            <a href="{{ url_for('movements') }}" class="text-xs font-semibold text-indigo-600 hover:underline">
+                Transfer / Adjust &rarr;
+            </a>
+        </div>
+    </div>
+
+    <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs" id="currentStockTable">
+            <thead class="bg-slate-50 text-slate-500 uppercase border-b border-slate-200">
+                <tr>
+                    <th class="px-4 py-3">SKU</th>
+                    <th class="px-4 py-3">Product Name</th>
+                    <th class="px-4 py-3">Category</th>
+                    <th class="px-4 py-3 text-right">Unit Cost / Price</th>
+                    <th class="px-4 py-3 text-center bg-indigo-50/50 text-indigo-950">
+                        {% if selected_location %}
+                            Stock in {{ selected_location.name }}
+                        {% else %}
+                            Total Stock Qty
+                        {% endif %}
+                    </th>
+                    <th class="px-4 py-3 text-center">Min Stock Status</th>
+                    <th class="px-4 py-3 text-right">Valuation</th>
+                    <th class="px-4 py-3 text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 text-sm">
+                {% for row in stock_rows %}
+                {% set p = row.product %}
+                {% set qty = row.quantity %}
+                <tr class="stock-row hover:bg-slate-50/80"
+                    data-search="{{ (p.sku ~ ' ' ~ p.name ~ ' ' ~ p.category)|lower }}">
+                    <td class="px-4 py-3 font-mono text-xs font-bold text-indigo-600">{{ p.sku }}</td>
+                    <td class="px-4 py-3">
+                        <div class="font-semibold text-slate-900">{{ p.name }}</div>
+                        {% if not selected_location and row.loc_breakdown %}
+                            <div class="flex flex-wrap gap-1 mt-1">
+                                {% for lb in row.loc_breakdown %}
+                                    <a href="{{ url_for('inventory', location_id=lb.loc_id) }}"
+                                       class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 hover:bg-indigo-50 text-slate-600 hover:text-indigo-700 transition">
+                                        <span>{{ lb.loc_name }}:</span>
+                                        <strong class="text-slate-900">{{ lb.qty }}</strong>
+                                    </a>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3">
+                        <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-xs font-medium">
+                            {{ p.category }}
+                        </span>
+                    </td>
+                    <td class="px-4 py-3 text-right whitespace-nowrap">
+                        <div class="text-xs text-slate-500">Cost: ${{ "{:,.2f}".format(p.cost) }}</div>
+                        <div class="text-xs font-bold text-slate-900">Price: ${{ "{:,.2f}".format(p.price) }}</div>
+                    </td>
+                    <td class="px-4 py-3 text-center bg-indigo-50/20">
+                        <span class="inline-flex items-center justify-center min-w-[2.75rem] px-3 py-1 rounded-full text-sm font-extrabold
+                            {% if row.status == 'Optimal' %}bg-emerald-100 text-emerald-800
+                            {% elif row.status == 'Low Stock' %}bg-amber-100 text-amber-800
+                            {% else %}bg-rose-100 text-rose-800{% endif %}">
+                            {{ qty }}
+                        </span>
+                    </td>
+                    <td class="px-4 py-3 text-center whitespace-nowrap">
+                        {% if row.status == 'Optimal' %}
+                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                Optimal (Min: {{ row.min_stock }})
+                            </span>
+                        {% elif row.status == 'Low Stock' %}
+                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                                <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                                Low Stock (Min: {{ row.min_stock }})
+                            </span>
+                        {% else %}
+                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+                                <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                                Out of Stock (Min: {{ row.min_stock }})
+                            </span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-right font-bold text-slate-900">${{ "{:,.2f}".format(row.valuation) }}</td>
+                    <td class="px-4 py-3 text-right whitespace-nowrap">
+                        <button type="button"
+                                onclick="document.getElementById('edit-prod-{{ p.id }}').classList.toggle('hidden')"
+                                class="text-xs font-medium text-indigo-600 hover:underline mr-2">
+                            Edit
+                        </button>
+                        <form action="{{ url_for('delete_product', prod_id=p.id) }}" method="POST" class="inline"
+                              onsubmit="return confirm('Delete product {{ p.sku }}?');">
+                            <button type="submit" class="text-xs font-medium text-rose-600 hover:underline">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                <!-- Inline Edit Row -->
+                <tr id="edit-prod-{{ p.id }}" class="hidden bg-slate-50">
+                    <td colspan="8" class="px-4 py-3">
+                        <form action="{{ url_for('edit_product', prod_id=p.id) }}" method="POST"
+                              class="grid grid-cols-1 sm:grid-cols-7 gap-2.5 items-end text-xs">
+                            <input type="hidden" name="location_filter" value="{{ location_filter }}">
+                            <div>
+                                <label class="block font-semibold text-slate-600 mb-1">SKU</label>
+                                <input type="text" name="sku" value="{{ p.sku }}" required class="w-full rounded border border-slate-300 px-2.5 py-1.5 bg-white">
+                            </div>
+                            <div class="sm:col-span-2">
+                                <label class="block font-semibold text-slate-600 mb-1">Product Name</label>
+                                <input type="text" name="name" value="{{ p.name }}" required class="w-full rounded border border-slate-300 px-2.5 py-1.5 bg-white">
+                            </div>
+                            <div>
+                                <label class="block font-semibold text-slate-600 mb-1">Category</label>
+                                <input type="text" name="category" value="{{ p.category }}" class="w-full rounded border border-slate-300 px-2.5 py-1.5 bg-white">
+                            </div>
+                            <div>
+                                <label class="block font-semibold text-slate-600 mb-1">Cost / Price</label>
+                                <div class="grid grid-cols-2 gap-1">
+                                    <input type="number" step="0.01" min="0" name="cost" value="{{ p.cost }}" required class="w-full rounded border border-slate-300 px-2 py-1.5 bg-white" title="Cost">
+                                    <input type="number" step="0.01" min="0" name="price" value="{{ p.price }}" required class="w-full rounded border border-slate-300 px-2 py-1.5 bg-white" title="Price">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block font-semibold text-slate-600 mb-1">Min Stock Alert</label>
+                                <input type="number" min="0" name="min_stock" value="{{ p.min_stock }}" required class="w-full rounded border border-slate-300 px-2.5 py-1.5 bg-white">
+                            </div>
+                            <div>
+                                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-1.5 px-3 rounded">
+                                    Save Changes
+                                </button>
+                            </div>
+                        </form>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="8" class="px-4 py-10 text-center text-slate-400">
+                        {% if selected_location %}
+                            No products or stock recorded in <strong>{{ selected_location.name }}</strong> yet.
+                            Use the form below or <a href="{{ url_for('purchases') }}" class="text-indigo-600 font-semibold hover:underline">register a purchase</a> to add stock to this location.
+                        {% else %}
+                            No products registered in the catalog yet. Use the form below to create your first product.
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Creation Forms: Add Product & Add Location -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Create Product Form -->
+    <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+        <h2 class="text-sm font-bold text-slate-900 mb-3">Create New Product (SKU)</h2>
+        <form action="{{ url_for('add_product') }}" method="POST" class="grid grid-cols-1 sm:grid-cols-4 gap-3 text-sm">
+            <input type="hidden" name="active_location_filter" value="{{ location_filter }}">
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">SKU Code *</label>
+                <input type="text" name="sku" required placeholder="e.g. RI-SOL-500"
+                       class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
+            </div>
+            <div class="sm:col-span-2">
+                <label class="block text-xs font-medium text-slate-600 mb-1">Product Name *</label>
+                <input type="text" name="name" required placeholder="e.g. Solar Panel Monocrystalline 500W"
+                       class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Category</label>
+                <input type="text" name="category" placeholder="Energy / Connectivity"
+                       class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Unit Cost (USD) *</label>
+                <input type="number" step="0.01" min="0" name="cost" required placeholder="0.00"
+                       class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Selling Price (USD) *</label>
+                <input type="number" step="0.01" min="0" name="price" required placeholder="0.00"
+                       class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Min Stock Alert *</label>
+                <input type="number" min="0" name="min_stock" value="5" required
+                       class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Opening Stock Qty</label>
+                <input type="number" min="0" name="initial_qty" value="0"
+                       class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
+            </div>
+            <div class="sm:col-span-2">
+                <label class="block text-xs font-medium text-slate-600 mb-1">Assign to Initial Location</label>
+                <select name="initial_location_id" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
+                    {% for loc in active_locations %}
+                        <option value="{{ loc.id }}" {% if selected_location and selected_location.id == loc.id %}selected{% endif %}>
+                            {{ loc.name }} ({{ loc.location_type }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="sm:col-span-2 flex items-end">
+                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition text-sm">
+                    + Add Product to Catalog
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Quick Create Location Form -->
+    <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col justify-between">
+        <div>
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-sm font-bold text-slate-900">Add Warehouse / Store</h2>
+                <a href="{{ url_for('locations_manage') }}" class="text-xs font-semibold text-indigo-600 hover:underline">Manage All &rarr;</a>
+            </div>
+            <form action="{{ url_for('add_location') }}" method="POST" class="space-y-3 text-sm">
+                <input type="hidden" name="next" value="inventory">
+                <div>
+                    <label class="block text-xs font-medium text-slate-600 mb-1">Location Name *</label>
+                    <input type="text" name="name" required placeholder="e.g. Maracaibo Branch Store"
+                           class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-600 mb-1">Type</label>
+                    <select name="location_type" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
+                        <option value="Warehouse">Warehouse (Almacén)</option>
+                        <option value="Store">Retail Store (Tienda)</option>
+                        <option value="Transit Hub">Transit Hub (Aduana)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-600 mb-1">Address / Notes</label>
+                    <input type="text" name="address" placeholder="Street or Industrial Zone"
+                           class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
+                </div>
+                <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2 px-4 rounded-lg transition text-sm">
+                    + Create Location
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    function filterStockTable() {
+        const query = (document.getElementById('stockSearchInput').value || '').toLowerCase().trim();
+        document.querySelectorAll('#currentStockTable .stock-row').forEach(row => {
+            const text = row.getAttribute('data-search') || '';
+            if (!query || text.includes(query)) {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        });
+    }
+</script>
+{% endblock %}

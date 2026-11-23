@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}Stock Movements & Adjustments — RusaImport{% endblock %}
+{% block page_title %}Stock Movements, Transfers &amp; Losses{% endblock %}
+{% block page_subtitle %}Register inter-warehouse transfers, inventory losses (expiration, damage, donations), or quick purchases{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- 1. Quick Single-SKU Purchase (with Ship Fee & Wallet Outflow) -->
+    <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+        <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                <h2 class="text-sm font-bold text-slate-900">Quick Supplier Purchase</h2>
+            </div>
+            <a href="{{ url_for('purchases') }}" class="text-xs font-semibold text-emerald-700 hover:underline">
+                Multi-Item PO &rarr;
+            </a>
+        </div>
+        <form action="{{ url_for('movements') }}" method="POST" class="space-y-2.5 text-sm">
+            <input type="hidden" name="movement_type" value="PURCHASE">
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Supplier (Proveedor) *</label>
+                <select name="supplier_id" required class="w-full rounded-lg border border-slate-300 px-3 py-1.5 bg-white text-xs font-medium">
+                    {% for s in suppliers %}
+                        <option value="{{ s.id }}">{{ s.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Product *</label>
+                <select name="product_id" required class="w-full rounded-lg border border-slate-300 px-3 py-1.5 bg-white text-xs font-medium">
+                    {% for p in products %}
+                        <option value="{{ p.id }}">{{ p.sku }} — {{ p.name }} (${{ "{:.2f}".format(p.cost) }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Target Location *</label>
+                <select name="to_location_id" required class="w-full rounded-lg border border-slate-300 px-3 py-1.5 bg-white text-xs font-medium">
+                    {% for loc in locations %}
+                        <option value="{{ loc.id }}">{{ loc.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="grid grid-cols-3 gap-2">
+                <div>
+                    <label class="block text-xs font-medium text-slate-600 mb-1">Qty *</label>
+                    <input type="number" name="quantity" min="1" required placeholder="10"
+                           class="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-600 mb-1">Unit Cost ($)</label>
+                    <input type="number" step="0.01" min="0" name="unit_cost" placeholder="Default"
+                           class="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-amber-800 mb-1">Ship Fee ($)</label>
+                    <input type="number" step="0.01" min="0" name="ship_fee" value="0.00"
+                           class="w-full rounded-lg border border-amber-300 bg-amber-50/40 px-2.5 py-1.5 text-xs font-semibold">
+                </div>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Pay From Wallet (Outflow) *</label>
+                <select name="wallet_id" required class="w-full rounded-lg border border-slate-300 px-3 py-1.5 bg-white text-xs font-medium">
+                    {% for w in wallets %}
+                        <option value="{{ w.id }}">{{ w.name }} (${{ "{:,.2f}".format(w.balance) }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Notes</label>
+                <input type="text" name="notes" placeholder="e.g. Container invoice #901"
+                       class="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs">
+            </div>
+            <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded-lg transition text-xs">
+                Receive Purchase &amp; Deduct Wallet
+            </button>
+        </form>
+    </div>
+
+    <!-- 2. Inter-Location Transfer -->
+    <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+        <div class="flex items-center gap-2 mb-3">
+            <span class="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
+            <h2 class="text-sm font-bold text-slate-900">Inter-Location Transfer</h2>
+        </div>
+        <form action="{{ url_for('movements') }}" method="POST" class="space-y-3 text-sm">
+            <input type="hidden" name="movement_type" value="TRANSFER">
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Product *</label>
+                <select name="product_id" required class="w-full rounded-lg border border-slate-300 px-3 py-2 bg-white text-sm">
+                    {% for p in products %}
+                        <option value="{{ p.id }}">{{ p.sku }} — {{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Origin Location (Deduct From) *</label>
+                <select name="from_location_id" required class="w-full rounded-lg border border-slate-300 px-3 py-2 bg-white text-sm">
+                    {% for loc in locations %}
+                        <option value="{{ loc.id }}">{{ loc.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Destination Location (Add To) *</label>
+                <select name="to_location_id" required class="w-full rounded-lg border border-slate-300 px-3 py-2 bg-white text-sm">
+                    {% for loc in locations %}
+                        <option value="{{ loc.id }}" {% if loop.index == 2 %}selected{% endif %}>{{ loc.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Quantity to Transfer *</label>
+                <input type="number" name="quantity" min="1" required placeholder="5"
+                       class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Dispatch Guide / Notes</label>
+                <input type="text" name="notes" placeholder="e.g. Internal transfer to showroom"
+                       class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+            </div>
+            <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition text-sm">
+                Execute Transfer
+            </button>
+        </form>
+    </div>
+
+    <!-- 3. Loss / Shrinkage Adjustment -->
+    <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+        <div class="flex items-center gap-2 mb-3">
+            <span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+            <h2 class="text-sm font-bold text-slate-900">Inventory Loss / Adjustment</h2>
+        </div>
+        <form action="{{ url_for('movements') }}" method="POST" class="space-y-3 text-sm">
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Adjustment Reason *</label>
+                <select name="movement_type" required class="w-full rounded-lg border border-slate-300 px-3 py-2 bg-white text-sm">
+                    <option value="LOSS_DAMAGE">Damage / Defective Unit (Avería)</option>
+                    <option value="LOSS_EXPIRATION">Expiration / Obsolescence (Vencimiento)</option>
+                    <option value="LOSS_DONATION">Donation / Promotional Sample (Donación)</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Product *</label>
+                <select name="product_id" required class="w-full rounded-lg border border-slate-300 px-3 py-2 bg-white text-sm">
+                    {% for p in products %}
+                        <option value="{{ p.id }}">{{ p.sku }} — {{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Deduct From Location *</label>
+                <select name="from_location_id" required class="w-full rounded-lg border border-slate-300 px-3 py-2 bg-white text-sm">
+                    {% for loc in locations %}
+                        <option value="{{ loc.id }}">{{ loc.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Quantity Lost / Adjusted *</label>
+                <input type="number" name="quantity" min="1" required placeholder="1"
+                       class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Audit Explanation *</label>
+                <input type="text" name="notes" required placeholder="Reason for write-off"
+                       class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+            </div>
+            <button type="submit" class="w-full bg-rose-600 hover:bg-rose-700 text-white font-semibold py-2 px-4 rounded-lg transition text-sm">
+                Record Stock Write-Off
+            </button>
+        </form>
+    </div>
+</div>
+
+<!-- Audit Log of Movements -->
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+    <div class="px-5 py-4 border-b border-slate-100">
+        <h2 class="font-bold text-slate-900 text-sm">Stock Movement &amp; Adjustment Ledger</h2>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs">
+            <thead class="bg-slate-50 text-slate-500 uppercase border-b border-slate-200">
+                <tr>
+                    <th class="px-4 py-3">Date (UTC)</th>
+                    <th class="px-4 py-3">Type</th>
+                    <th class="px-4 py-3">Product</th>
+                    <th class="px-4 py-3">From Location</th>
+                    <th class="px-4 py-3">To Location</th>
+                    <th class="px-4 py-3 text-right">Qty</th>
+                    <th class="px-4 py-3 text-right">Unit Cost</th>
+                    <th class="px-4 py-3">Notes / Supplier</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 text-sm">
+                {% for m in history %}
+                <tr class="hover:bg-slate-50">
+                    <td class="px-4 py-3 text-xs text-slate-500">{{ m.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td class="px-4 py-3">
+                        <span class="px-2 py-0.5 rounded text-xs font-semibold
+                            {% if m.movement_type == 'PURCHASE' %}bg-emerald-50 text-emerald-700
+                            {% elif m.movement_type == 'TRANSFER' %}bg-indigo-50 text-indigo-700
+                            {% elif m.movement_type == 'SALE' %}bg-sky-50 text-sky-700
+                            {% else %}bg-rose-50 text-rose-700{% endif %}">
+                            {{ m.movement_type.replace('_', ' ') }}
+                        </span>
+                    </td>
+                    <td class="px-4 py-3 font-medium text-slate-900">{{ m.product.sku }} — {{ m.product.name }}</td>
+                    <td class="px-4 py-3 text-slate-600">{{ m.from_location.name if m.from_location else '—' }}</td>
+                    <td class="px-4 py-3 text-slate-600">{{ m.to_location.name if m.to_location else '—' }}</td>
+                    <td class="px-4 py-3 text-right font-bold text-slate-900">{{ m.quantity }}</td>
+                    <td class="px-4 py-3 text-right text-slate-600">${{ "{:,.2f}".format(m.unit_cost) }}</td>
+                    <td class="px-4 py-3 text-xs text-slate-500">
+                        {{ m.notes }}
+                        {% if m.supplier %}<span class="block text-indigo-600">Supplier: {{ m.supplier.name }}</span>{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

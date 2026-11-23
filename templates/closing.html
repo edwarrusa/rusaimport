@@ -1,0 +1,330 @@
+{% extends "base.html" %}
+{% block title %}Monthly Closing (Cierre de Mes) — RusaImport{% endblock %}
+{% block page_title %}Monthly Closing (Cierre de Mes — {{ period_label }}){% endblock %}
+{% block page_subtitle %}Compile, inspect, print, or download the financial summary (Revenue, COGS, Expenses, Shipping Fees, and Net Profit){% endblock %}
+
+{% block content %}
+<!-- Accounting Period Selection & Report Action Bar -->
+<div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 no-print">
+    <div>
+        <h2 class="text-sm font-bold text-slate-900">Accounting Period &amp; Report Generator</h2>
+        <p class="text-xs text-slate-500">Select a month and year (or All-Time) and click <strong>Generate Report</strong> to compile the closing statement</p>
+    </div>
+
+    <form id="closingReportForm" action="{{ url_for('closing') }}" method="GET" class="flex flex-wrap items-center gap-2.5">
+        <input type="hidden" name="generate" value="1">
+        <input type="hidden" name="month" id="syncedMonthInput" value="{{ selected_month }}">
+
+        <!-- Period Mode Selector -->
+        <select name="period_mode" id="periodModeSelect" onchange="onPeriodControlChange()"
+                class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:border-indigo-500 focus:outline-none">
+            <option value="monthly" {% if selected_month != 'all' %}selected{% endif %}>Monthly Period</option>
+            <option value="all" {% if selected_month == 'all' %}selected{% endif %}>All-Time Cumulative</option>
+        </select>
+
+        <!-- Month Selector -->
+        <select name="month_num" id="monthNumSelect" onchange="onPeriodControlChange()"
+                class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-indigo-500 focus:outline-none {% if selected_month == 'all' %}opacity-50 pointer-events-none{% endif %}">
+            {% for m_num, m_name in month_names %}
+                <option value="{{ m_num }}" {% if m_num == selected_month_num %}selected{% endif %}>
+                    {{ "%02d"|format(m_num) }} — {{ m_name }}
+                </option>
+            {% endfor %}
+        </select>
+
+        <!-- Year Selector -->
+        <select name="year" id="yearSelect" onchange="onPeriodControlChange()"
+                class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-indigo-500 focus:outline-none {% if selected_month == 'all' %}opacity-50 pointer-events-none{% endif %}">
+            {% for y in available_years %}
+                <option value="{{ y }}" {% if y == selected_year %}selected{% endif %}>{{ y }}</option>
+            {% endfor %}
+        </select>
+
+        <!-- Primary Generate Report Button -->
+        <button type="submit" id="generateReportBtn"
+                class="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2.5 rounded-lg shadow-sm transition cursor-pointer">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+            <span id="generateBtnLabel">Generate Report</span>
+        </button>
+
+        <!-- Export CSV & Print Buttons -->
+        <a id="downloadCsvLink" href="{{ url_for('closing_export', month=selected_month) }}"
+           class="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3.5 py-2.5 rounded-lg shadow-sm transition">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            <span>Download CSV</span>
+        </a>
+
+        <button type="button" onclick="window.print()"
+                class="inline-flex items-center gap-1.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold px-3.5 py-2.5 rounded-lg shadow-sm transition">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+            <span>Print / PDF</span>
+        </button>
+    </form>
+</div>
+
+<!-- Compiled Report Status Header Banner -->
+<div id="compiledReportBanner" class="bg-indigo-950 text-white rounded-xl p-5 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border border-indigo-800">
+    <div>
+        <div class="flex items-center gap-2">
+            <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                Compiled Closing Statement
+            </span>
+            <span id="reportTimestamp" class="text-xs text-indigo-300 font-mono">Generated: {{ generated_at }}</span>
+        </div>
+        <h2 id="reportPeriodTitle" class="text-lg font-extrabold mt-1">
+            RusaImport — Executive Closing Report: {{ period_label }}
+        </h2>
+        <p class="text-xs text-indigo-200 mt-0.5">
+            Includes <strong id="bannerSalesCount">{{ monthly_sales|length }}</strong> POS sales,
+            <strong id="bannerPoCount">{{ monthly_pos|length }}</strong> merchandise purchase orders, and
+            <strong id="bannerTxCount">{{ monthly_txs|length }}</strong> wallet transactions.
+        </p>
+    </div>
+    <div class="text-left sm:text-right">
+        <span class="text-xs uppercase tracking-wider text-indigo-300 block">Period Net Result</span>
+        <span id="bannerNetProfit" class="text-2xl font-extrabold {% if net_profit >= 0 %}text-emerald-400{% else %}text-rose-400{% endif %}">
+            ${{ "{:,.2f}".format(net_profit) }}
+        </span>
+    </div>
+</div>
+
+<!-- Core P&L Metrics -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+    <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+        <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Sales Revenue</span>
+        <p id="kpiSalesRevenue" class="mt-2 text-2xl font-extrabold text-emerald-600">${{ "{:,.2f}".format(sales_revenue) }}</p>
+        <p id="kpiSalesSub" class="mt-1 text-xs text-slate-500">{{ monthly_sales|length }} POS orders in {{ period_label }}</p>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+        <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Cost of Goods Sold (COGS)</span>
+        <p id="kpiCogs" class="mt-2 text-2xl font-extrabold text-slate-900">${{ "{:,.2f}".format(cogs_total) }}</p>
+        <p id="kpiGrossMargin" class="mt-1 text-xs text-slate-500">Gross Margin: {{ "{:.1f}".format(gross_margin_pct) }}%</p>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+        <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Shipping Fees (Fletes)</span>
+        <p id="kpiShipFees" class="mt-2 text-2xl font-extrabold text-amber-600">${{ "{:,.2f}".format(ship_fees_total) }}</p>
+        <p id="kpiPoSub" class="mt-1 text-xs text-slate-500">From {{ monthly_pos|length }} purchase orders &amp; wallet outflows</p>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+        <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Operating Expenses</span>
+        <p id="kpiOpEx" class="mt-2 text-2xl font-extrabold text-rose-600">${{ "{:,.2f}".format(operating_expenses) }}</p>
+        <p id="kpiLossesSub" class="mt-1 text-xs text-slate-500">Shrinkage Losses: ${{ "{:,.2f}".format(inventory_loss_value) }}</p>
+    </div>
+
+    <div id="kpiNetProfitCard" class="rounded-xl p-5 shadow-sm {% if net_profit >= 0 %}bg-emerald-900 text-white{% else %}bg-rose-900 text-white{% endif %}">
+        <span class="text-xs font-semibold uppercase tracking-wider opacity-80">Net Profit (Utilidad Neta)</span>
+        <p id="kpiNetProfit" class="mt-2 text-2xl font-extrabold">${{ "{:,.2f}".format(net_profit) }}</p>
+        <p class="mt-1 text-xs opacity-80">Revenue - COGS - Expenses - Ship Fees</p>
+    </div>
+</div>
+
+<!-- Income Statement (P&L) & Wallet Cash Flow Summary -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- 1. Income Statement (Estado de Resultados) -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-100">
+            <h3 class="font-bold text-slate-900 text-sm">Income Statement (Estado de Resultados — P&amp;L)</h3>
+            <p class="text-xs text-slate-500">Formula: Revenue - COGS - Operating Expenses - Shipping Fees (- Inventory Shrinkage)</p>
+        </div>
+        <div class="p-5 space-y-2.5 text-sm">
+            <div class="flex justify-between py-1.5 border-b border-slate-100">
+                <span class="text-slate-600">(+) Sales Revenue (Ingresos por Ventas)</span>
+                <span id="plRevenue" class="font-bold text-emerald-600">+${{ "{:,.2f}".format(sales_revenue) }}</span>
+            </div>
+            {% if other_income > 0 %}
+            <div class="flex justify-between py-1.5 border-b border-slate-100">
+                <span class="text-slate-600">(+) Other Operating Inflows</span>
+                <span class="font-semibold text-emerald-600">+${{ "{:,.2f}".format(other_income) }}</span>
+            </div>
+            {% endif %}
+            <div class="flex justify-between py-1.5 border-b border-slate-100">
+                <span class="text-slate-600">(-) Cost of Goods Sold (COGS / Costo de Venta)</span>
+                <span id="plCogs" class="font-semibold text-slate-800">-${{ "{:,.2f}".format(cogs_total) }}</span>
+            </div>
+            <div class="flex justify-between py-2 bg-slate-50 px-3 rounded-lg font-bold">
+                <span class="text-slate-800">(=) Gross Profit (Utilidad Bruta)</span>
+                <span id="plGrossProfit" class="text-slate-900">${{ "{:,.2f}".format(gross_profit) }}</span>
+            </div>
+            <div class="flex justify-between py-1.5 border-b border-slate-100">
+                <span class="text-slate-600">(-) Operating Expenses (Gastos Operativos)</span>
+                <span id="plOpEx" class="font-semibold text-rose-600">-${{ "{:,.2f}".format(operating_expenses) }}</span>
+            </div>
+            <div class="flex justify-between py-1.5 border-b border-slate-100">
+                <span class="text-slate-600">(-) Supplier Shipping Fees (Costo de Envío / Flete)</span>
+                <span id="plShipFees" class="font-semibold text-amber-600">-${{ "{:,.2f}".format(ship_fees_total) }}</span>
+            </div>
+            <div class="flex justify-between py-1.5 border-b border-slate-100">
+                <span class="text-slate-600">(-) Inventory Shrinkage (Expiration, Damage, Donations)</span>
+                <span id="plLosses" class="font-semibold text-rose-600">-${{ "{:,.2f}".format(inventory_loss_value) }}</span>
+            </div>
+            <div class="flex justify-between py-3 px-3 rounded-lg font-extrabold text-base {% if net_profit >= 0 %}bg-emerald-50 text-emerald-900{% else %}bg-rose-50 text-rose-900{% endif %}">
+                <span>(=) Net Profit (Utilidad Neta del Período)</span>
+                <span id="plNetProfit">${{ "{:,.2f}".format(net_profit) }}</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. Wallet Movements & Cash Flow Summary (Flujo de Caja en Billeteras) -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-100">
+            <h3 class="font-bold text-slate-900 text-sm">Wallet Movements &amp; Cash Flow Summary (Flujo de Caja)</h3>
+            <p class="text-xs text-slate-500">Direct aggregation of all wallet inflows and outflows recorded in {{ period_label }}</p>
+        </div>
+        <div class="p-5 space-y-2.5 text-sm">
+            <div class="flex justify-between py-1.5 border-b border-slate-100">
+                <span class="text-slate-600">(+) Wallet Inflows from POS Sales</span>
+                <span id="cfSalesIn" class="font-bold text-emerald-600">+${{ "{:,.2f}".format(sales_revenue) }}</span>
+            </div>
+            <div class="flex justify-between py-1.5 border-b border-slate-100">
+                <span class="text-slate-600">(-) Wallet Outflows for Merchandise Purchases (Compras)</span>
+                <span id="cfPurchasesOut" class="font-semibold text-rose-600">-${{ "{:,.2f}".format(inventory_purchases_outflow) }}</span>
+            </div>
+            <div class="flex justify-between py-1.5 border-b border-slate-100">
+                <span class="text-slate-600">(-) Wallet Outflows for Shipping Fees (Fletes)</span>
+                <span id="cfShipOut" class="font-semibold text-amber-600">-${{ "{:,.2f}".format(ship_fees_total) }}</span>
+            </div>
+            <div class="flex justify-between py-1.5 border-b border-slate-100">
+                <span class="text-slate-600">(-) Wallet Outflows for Operating Expenses</span>
+                <span id="cfOpExOut" class="font-semibold text-rose-600">-${{ "{:,.2f}".format(operating_expenses) }}</span>
+            </div>
+            <div class="flex justify-between py-2 bg-slate-50 px-3 rounded-lg font-bold">
+                <span class="text-slate-800">Total Period Wallet Outflows (Purchases + Ship + OpEx)</span>
+                <span id="cfTotalOut" class="text-rose-700">-${{ "{:,.2f}".format(total_wallet_outflows) }}</span>
+            </div>
+            <div class="flex justify-between py-3 px-3 rounded-lg font-extrabold text-base {% if net_wallet_cashflow >= 0 %}bg-indigo-50 text-indigo-900{% else %}bg-amber-50 text-amber-900{% endif %}">
+                <span>(=) Net Period Wallet Cash Flow</span>
+                <span id="cfNetCashflow">{% if net_wallet_cashflow >= 0 %}+{% endif %}${{ "{:,.2f}".format(net_wallet_cashflow) }}</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Breakdown by Financial Wallet for the Selected Period -->
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+    <div class="px-5 py-4 border-b border-slate-100">
+        <h3 class="font-bold text-slate-900 text-sm">Period Movements Breakdown by Financial Wallet</h3>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs">
+            <thead class="bg-slate-50 text-slate-500 uppercase border-b border-slate-200">
+                <tr>
+                    <th class="px-4 py-3">Wallet</th>
+                    <th class="px-4 py-3 text-right">Sales Inflows (+)</th>
+                    <th class="px-4 py-3 text-right">Merchandise Purchases (-)</th>
+                    <th class="px-4 py-3 text-right">Ship Fees (-)</th>
+                    <th class="px-4 py-3 text-right">Operating Expenses (-)</th>
+                    <th class="px-4 py-3 text-right">Current Wallet Balance</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 text-sm">
+                {% for w_name, data in wallet_monthly_summary.items() %}
+                <tr class="hover:bg-slate-50">
+                    <td class="px-4 py-3 font-semibold text-slate-900">
+                        {{ w_name }}
+                        {% if data.wallet %}
+                        <span class="ml-1 text-xs font-normal text-slate-400">({{ data.wallet.wallet_type }})</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-right font-semibold text-emerald-600">+${{ "{:,.2f}".format(data.sales_in) }}</td>
+                    <td class="px-4 py-3 text-right text-rose-600">-${{ "{:,.2f}".format(data.purchases_out) }}</td>
+                    <td class="px-4 py-3 text-right text-amber-600">-${{ "{:,.2f}".format(data.ship_fee_out) }}</td>
+                    <td class="px-4 py-3 text-right text-rose-600">-${{ "{:,.2f}".format(data.opex_out) }}</td>
+                    <td class="px-4 py-3 text-right font-extrabold text-slate-900">
+                        ${{ "{:,.2f}".format(data.wallet.balance if data.wallet else 0.0) }}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6" class="px-4 py-6 text-center text-slate-400">No wallets registered yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Period Wallet Transactions Audit Table -->
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+        <h3 class="font-bold text-slate-900 text-sm">All Wallet Transactions Included in {{ period_label }} Closing ({{ monthly_txs|length }})</h3>
+        <a href="{{ url_for('wallets') }}" class="text-xs font-semibold text-indigo-600 hover:underline no-print">Manage Wallets &rarr;</a>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs">
+            <thead class="bg-slate-50 text-slate-500 uppercase border-b border-slate-200">
+                <tr>
+                    <th class="px-4 py-2.5">Date</th>
+                    <th class="px-4 py-2.5">Ref</th>
+                    <th class="px-4 py-2.5">Wallet</th>
+                    <th class="px-4 py-2.5">Category</th>
+                    <th class="px-4 py-2.5">Description</th>
+                    <th class="px-4 py-2.5 text-right">Amount</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 text-sm">
+                {% for tx in monthly_txs %}
+                <tr class="hover:bg-slate-50">
+                    <td class="px-4 py-2.5 text-xs text-slate-500">{{ tx.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td class="px-4 py-2.5 font-mono text-xs text-slate-600">{{ tx.reference_id }}</td>
+                    <td class="px-4 py-2.5 font-medium text-slate-800">{{ tx.wallet.name }}</td>
+                    <td class="px-4 py-2.5">
+                        <span class="px-2 py-0.5 rounded text-xs font-semibold
+                            {% if tx.category == 'Sale' %}bg-emerald-100 text-emerald-800
+                            {% elif tx.category == 'Purchase' %}bg-rose-100 text-rose-800
+                            {% elif tx.category == 'Ship Fee' %}bg-amber-100 text-amber-800
+                            {% else %}bg-slate-100 text-slate-700{% endif %}">
+                            {{ tx.category }}
+                        </span>
+                    </td>
+                    <td class="px-4 py-2.5 text-slate-700">{{ tx.description }}</td>
+                    <td class="px-4 py-2.5 text-right font-bold {% if tx.tx_type == 'INFLOW' %}text-emerald-600{% else %}text-rose-600{% endif %}">
+                        {% if tx.tx_type == 'INFLOW' %}+{% else %}-{% endif %}${{ "{:,.2f}".format(tx.amount) }}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6" class="px-4 py-6 text-center text-slate-400">No wallet transactions recorded for {{ period_label }}.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    function computeMonthParam() {
+        const mode = document.getElementById('periodModeSelect').value;
+        if (mode === 'all') {
+            return 'all';
+        }
+        const year = document.getElementById('yearSelect').value;
+        const monthNum = String(document.getElementById('monthNumSelect').value).padStart(2, '0');
+        return `${year}-${monthNum}`;
+    }
+
+    function onPeriodControlChange() {
+        const mode = document.getElementById('periodModeSelect').value;
+        const monthSel = document.getElementById('monthNumSelect');
+        const yearSel = document.getElementById('yearSelect');
+
+        if (mode === 'all') {
+            monthSel.classList.add('opacity-50', 'pointer-events-none');
+            yearSel.classList.add('opacity-50', 'pointer-events-none');
+        } else {
+            monthSel.classList.remove('opacity-50', 'pointer-events-none');
+            yearSel.classList.remove('opacity-50', 'pointer-events-none');
+        }
+
+        const monthParam = computeMonthParam();
+        document.getElementById('syncedMonthInput').value = monthParam;
+        document.getElementById('downloadCsvLink').href = `{{ url_for('closing_export') }}?month=${encodeURIComponent(monthParam)}`;
+    }
+
+    document.getElementById('closingReportForm').addEventListener('submit', function() {
+        onPeriodControlChange();
+        const btnLabel = document.getElementById('generateBtnLabel');
+        if (btnLabel) {
+            btnLabel.textContent = 'Compiling...';
+        }
+    });
+</script>
+{% endblock %}
