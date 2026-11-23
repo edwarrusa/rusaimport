@@ -31,8 +31,17 @@ if database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
 
 if not database_url:
-    sqlite_path = os.environ.get("SQLITE_DB_PATH", os.path.join(BASE_DIR, "rusaimport.db"))
-    database_url = "sqlite:///" + sqlite_path
+    default_sqlite_path = os.path.join(BASE_DIR, "rusaimport.db")
+    if os.path.isdir("/var/data") and os.access("/var/data", os.W_OK):
+        default_sqlite_path = "/var/data/rusaimport.db"
+    elif os.path.isdir("/data") and os.access("/data", os.W_OK):
+        default_sqlite_path = "/data/rusaimport.db"
+
+    sqlite_path = os.environ.get("SQLITE_DB_PATH", default_sqlite_path).strip()
+    sqlite_dir = os.path.dirname(os.path.abspath(sqlite_path))
+    if sqlite_dir and not os.path.exists(sqlite_dir):
+        os.makedirs(sqlite_dir, exist_ok=True)
+    database_url = "sqlite:///" + os.path.abspath(sqlite_path)
 
 app.config["SQLALCHEMY_DATABASE_URI"] = database_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False

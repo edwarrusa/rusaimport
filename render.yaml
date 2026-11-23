@@ -4,9 +4,15 @@ services:
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
+    disk:
+      name: rusaimport-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.3
+      - key: SQLITE_DB_PATH
+        value: /var/data/rusaimport.db
       - key: SECRET_KEY
         generateValue: true
       - key: ADMIN_USERNAME
