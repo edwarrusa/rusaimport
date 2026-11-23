@@ -25,7 +25,16 @@ BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "rusaimport-secret-key-2026")
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(BASE_DIR, "rusaimport.db")
+
+database_url = os.environ.get("DATABASE_URL", "").strip()
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
+
+if not database_url:
+    sqlite_path = os.environ.get("SQLITE_DB_PATH", os.path.join(BASE_DIR, "rusaimport.db"))
+    database_url = "sqlite:///" + sqlite_path
+
+app.config["SQLALCHEMY_DATABASE_URI"] = database_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db.init_app(app)
@@ -33,10 +42,11 @@ db.init_app(app)
 
 def ensure_schema_migrations():
     """Safely add new columns to existing SQLite tables without losing data."""
-    cols = [row[1] for row in db.session.execute(text("PRAGMA table_info(products)")).fetchall()]
-    if "min_stock" not in cols:
-        db.session.execute(text("ALTER TABLE products ADD COLUMN min_stock INTEGER NOT NULL DEFAULT 5"))
-        db.session.commit()
+    if app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite"):
+        cols = [row[1] for row in db.session.execute(text("PRAGMA table_info(products)")).fetchall()]
+        if "min_stock" not in cols:
+            db.session.execute(text("ALTER TABLE products ADD COLUMN min_stock INTEGER NOT NULL DEFAULT 5"))
+            db.session.commit()
 
 
 def ensure_default_admin():
@@ -1830,4 +1840,5 @@ with app.app_context():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
